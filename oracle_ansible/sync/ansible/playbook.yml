@@ -1,0 +1,39 @@
+---
+
+- hosts: all
+  remote_user: root
+  become: true
+
+  vars:
+    memory_size: 2048m
+    home_directory: /home/vagrant
+    user: vagrant
+    group: vagrant
+
+  tasks:
+    - name: Install unzip, alien, libaio1, unixodbc
+      apt: name={{ item }} state=installed update_cache=true
+      with_items:
+        - unzip
+        - alien
+        - libaio1
+        - unixodbc
+
+    - name: Copy files
+      copy: src={{ item.src }} dest={{ item.dest }} force=yes mode=0755
+      with_items:
+        - { src: '/sync/files/chkconfig', dest: '/sbin/chkconfig' }
+        - { src: '/sync/files/60-oracle.conf', dest: '/etc/sysctl.d/60-oracle.conf' }
+
+    - name: Start service procps
+      service: name=procps state=started
+
+    - name: Create link to /bin/awk
+      file: src=/usr/bin/awk dest=/bin/awk state=link
+
+    - name: Create files
+      file: path={{ item.path }} state={{ item.state }}
+      with_items:
+        - { path: '/var/lock/subsys', state: 'directory' }
+        - { path: '/var/lock/subsys/listener', state: 'touch' }
+

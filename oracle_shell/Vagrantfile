@@ -1,0 +1,55 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+require_relative 'string_bool'
+
+VAGRANTFILE_API_VERSION = "2"
+
+PROXY     = "http://proxy.hu"
+
+BOX       = ENV["BOX"] || "oracle_shell"
+BOX_URL   = ENV["BOX_URL"] || "https://atlas.hashicorp.com/ubuntu/boxes/trusty64/versions/14.04/providers/virtualbox.box"
+HOSTNAME  = ENV["HOSTNAME"] || "oracle-home"
+
+USE_PROXY = ENV["USE_PROXY"].nil? ? true : ENV["USE_PROXY"].to_bool
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  if Vagrant.has_plugin?("vagrant-proxyconf") && USE_PROXY
+    config.proxy.http     = PROXY
+    config.proxy.https    = PROXY
+    config.proxy.ftp      = PROXY
+    config.proxy.no_proxy = "localhost,127.0.0.1,.example.com"
+  end
+
+  config.vm.box = BOX
+  config.vm.box_url = BOX_URL
+  config.vm.hostname = HOSTNAME
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.vm.synced_folder "./sync/", "/sync"
+  config.vm.network :forwarded_port, guest: 1521, host: 3521
+
+  # if 'stdin is not tty' stucks during the instail
+  config.ssh.shell = "bash -c 'BASH_ENV=/etc/profile exec bash'"
+
+	config.vm.provision :install, type: :shell do |shell|
+		shell.path = "install.sh"
+	end
+
+  $init_db = <<-SCRIPT
+    . $HOME/.profile
+    sqlplus sys as sysdba @/sync/sql_scripts/init.sql
+  SCRIPT
+
+  config.vm.provision :init, type: :shell, inline: $init_db, privileged: false
+
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--name", "oracle_shell"]
+    vb.customize ["modifyvm", :id, "--memory", 2048]
+    vb.customize ["modifyvm", :id, "--cpus", 2]
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+  end
+
+end

@@ -1,0 +1,114 @@
+---
+
+- hosts: all
+  remote_user: root
+  become: true
+
+  vars:
+    memory_size: 2048m
+    home_directory: /home/vagrant
+    user: vagrant
+    group: vagrant
+
+  tasks:
+    - name: Install unzip, alien, libaio1, unixodbc
+      apt: name={{ item }} state=installed update_cache=true
+      with_items:
+        - unzip
+        - alien
+        - libaio1
+        - unixodbc
+
+    - name: Copy files
+      copy: src={{ item.src }} dest={{ item.dest }} force=yes mode=0755
+      with_items:
+        - { src: '/sync/files/chkconfig', dest: '/sbin/chkconfig' }
+        - { src: '/sync/files/60-oracle.conf', dest: '/etc/sysctl.d/60-oracle.conf' }
+
+    - name: Start service procps
+      service: name=procps state=started
+
+    - name: Create link to /bin/awk
+      file: src=/usr/bin/awk dest=/bin/awk state=link
+
+    - name: Create files
+      file: path={{ item.path }} state={{ item.state }}
+      with_items:
+        - { path: '/var/lock/subsys', state: 'directory' }
+        - { path: '/var/lock/subsys/listener', state: 'touch' }
+
+    - name: Get full name of oracle deb
+      shell: ls /sync/oracle/ | grep "deb"
+      register: oracle_deb
+      failed_when: oracle_deb.rc > 1
+      changed_when: oracle_deb.rc == 1
+
+    - name: Install oracle_deb package
+      apt: deb="/sync/oracle/{{ oracle_deb.stdout }}"
+
+    - name: Remove dir /dev/shm for oracle
+      file: path=/dev/shm state=absent
+    - name: Create dir /dev/shm for oracle
+      file: path=/dev/shm state=directory
+
+    - name: Mount fs to /dev/shm
+      shell: mount -t tmpfs shmfs -o size={{ memory_size }} /dev/shm
+
+    - name: Add /etc/rc2.d/S01shm_load
+      copy: src=/sync/files/S01shm_load dest=/etc/rc2.d/S01shm_load mode=0755
+
+    - name: Add env vars to /etc/bash.bashrc
+      lineinfile:
+        dest: /etc/bash.bashrc
+        insertafter: EOF
+        state: present
+        line: |
+
+          # for oracle
+          export ORACLE_HOME=/u01/app/oracle/product/11.2.0/xe
+          export ORACLE_HOME=/u01/app/oracle/product/11.2.0/xe
+          export ORACLE_SID=XE
+          export NLS_LANG=`$ORACLE_HOME/bin/nls_lang.sh`
+          export ORACLE_BASE=/u01/app/oracle
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+          export PATH=$ORACLE_HOME/bin:$PATH
+
+    - name: Download rlwrap extension to sqlplus commandline
+      get_url:
+        url: http://ge.archive.ubuntu.com/ubuntu/pool/universe/r/rlwrap/rlwrap_0.37-2_amd64.deb
+        dest: "{{ home_directory }}"
+
+    - name: Get full name of rlwrap
+      shell: ls {{ home_directory }} | grep rlwrap | tail -n1
+      register: rlwrap
+      failed_when: rlwrap.rc > 1
+      changed_when: rlwrap.rc == 1
+
+    - name: Install rlwrap
+      apt: deb="{{ home_directory }}/{{ rlwrap.stdout }}"
+
+    - name: Copy .oracle_keywords to home folder
+      copy: src=/sync/oracle/.oracle_keywords dest={{ home_directory }} owner={{ user }} group={{ group }}
+
+    - name: Create alias for sqlplus with rlwrap
+      shell: alias sqlplus='/usr/bin/rlwrap -if $HOME/.oracle_keywords $ORACLE_HOME/bin/sqlplus'
+
+    - name: Add sqlplus alias to the bashrc
+      lineinfile:
+        dest: "{{ home_directory }}/.bashrc"
+        insertafter: EOF
+        state: present
+        line: |
+
+          # for sqlplus
+          alias sqlplus='/usr/bin/rlwrap -if $HOME/.oracle_keywords $ORACLE_HOME/bin/sqlplus'
+
+    - name: Configure oracle
+      shell: /etc/init.d/oracle-xe configure responseFile="/sync/oracle/response/xe.rsp"
+
+    - name: Add dba_user
+      shell: usermod -a -G dba {{ user }}
+
+    - name: Start oracle db service
+      service: name=oracle-xe state=started
+
