@@ -36,19 +36,18 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 	config.vm.provision :ansible, type: :ansible_local do |ansible|
     ansible.install_mode = :pip
     ansible.version = "2.0"
-    ansible.verbose = true
     ansible.provisioning_path = "/sync/ansible"
-    # ansible.inventory_path = "/sync/ansible/hosts"
     ansible.playbook = "playbook.yml"
 	end
 
   $init_db = <<-SCRIPT
-    . $HOME/.profile
+    export ORACLE_HOME=/u01/app/oracle/product/11.2.0/xe
+    export ORACLE_SID=XE
+		export PATH=$ORACLE_HOME/bin:$PATH
     sqlplus sys as sysdba @/sync/sql_scripts/init.sql
   SCRIPT
 
   config.vm.provision :init, type: :shell, inline: $init_db, privileged: false
-
 
   config.vm.provider "virtualbox" do |vb|
     vb.customize ["modifyvm", :id, "--name", "oracle_ansible"]
